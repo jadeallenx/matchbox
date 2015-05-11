@@ -4,17 +4,12 @@ import (
 	"strings"
 	"sync/atomic"
 	"unsafe"
-
-	"github.com/Workiva/go-datastructures/queue"
 )
-
-const hasherPoolSize = 16
 
 // ctrie is a concurrent, lock-free trie.
 type ctrie struct {
-	root       *iNode
-	config     *Config
-	hasherPool *queue.RingBuffer
+	root   *iNode
+	config *Config
 }
 
 // iNode is an indirection node. I-nodes remain present in the ctrie even as
