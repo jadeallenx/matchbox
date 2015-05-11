@@ -85,6 +85,18 @@ func (c *cNode) updated(key string, sub Subscriber) *cNode {
 	return &cNode{branches: branches}
 }
 
+// getBranches returns the branches for the given key. There are three
+// possible branches: exact match, single wildcard, and zero-or-more wildcard.
+func (c *cNode) getBranches(key string, config *Config) (*branch, *branch, *branch) {
+	return c.getBranch(key), c.getBranch(config.SingleWildcard),
+		c.getBranch(config.ZeroOrMoreWildcard)
+}
+
+// getBranch returns the branch for the given key or nil if one doesn't exist.
+func (c *cNode) getBranch(key string) *branch {
+	return c.branches[key]
+}
+
 // tNode is tomb node which is a special node used to ensure proper ordering
 // during removals.
 type tNode struct {
@@ -126,7 +138,7 @@ func (c *ctrie) Insert(topic string, sub Subscriber) {
 	keys = c.config.reduceZeroOrMoreWildcards(keys)
 	rootPtr := (*unsafe.Pointer)(unsafe.Pointer(&c.root))
 	root := (*iNode)(atomic.LoadPointer(rootPtr))
-	if !iinsert(root, keys, sub, nil) {
+	if !c.iinsert(root, keys, sub, nil) {
 		c.Insert(topic, sub)
 	}
 }
@@ -135,7 +147,7 @@ func (c *ctrie) Lookup(topic string) []Subscriber {
 	keys := strings.Split(topic, c.config.Delimiter)
 	rootPtr := (*unsafe.Pointer)(unsafe.Pointer(&c.root))
 	root := (*iNode)(atomic.LoadPointer(rootPtr))
-	result, ok := ilookup(root, keys, nil)
+	result, ok := c.ilookup(root, keys, nil)
 	if !ok {
 		return c.Lookup(topic)
 	}
@@ -146,7 +158,7 @@ func (c *ctrie) Remove(topic string, sub Subscriber) {
 	// TODO
 }
 
-func iinsert(i *iNode, keys []string, sub Subscriber, parent *iNode) bool {
+func (c *ctrie) iinsert(i *iNode, keys []string, sub Subscriber, parent *iNode) bool {
 	// Linearization point.
 	mainPtr := (*unsafe.Pointer)(unsafe.Pointer(&i.main))
 	main := (*mainNode)(atomic.LoadPointer(mainPtr))
@@ -169,7 +181,7 @@ func iinsert(i *iNode, keys []string, sub Subscriber, parent *iNode) bool {
 				if br.iNode != nil {
 					// If the branch has an I-node, iinsert is called
 					// recursively.
-					return iinsert(br.iNode, keys[1:], sub, i)
+					return c.iinsert(br.iNode, keys[1:], sub, i)
 				}
 				// Otherwise, an I-Node which points to a new C-node must be
 				// added. The linearization point is a successful CAS.
@@ -192,33 +204,58 @@ func iinsert(i *iNode, keys []string, sub Subscriber, parent *iNode) bool {
 	}
 }
 
-func ilookup(i *iNode, keys []string, parent *iNode) ([]Subscriber, bool) {
+func (c *ctrie) ilookup(i *iNode, keys []string, parent *iNode) ([]Subscriber, bool) {
 	// Linearization point.
 	mainPtr := (*unsafe.Pointer)(unsafe.Pointer(&i.main))
 	main := (*mainNode)(atomic.LoadPointer(mainPtr))
 	switch {
 	case main.cNode != nil:
-		cn := main.cNode
-		if br, ok := cn.branches[keys[0]]; !ok {
-			// If a branch doesn't exist for the key, no subscribers exist.
-			return nil, true
-		} else {
-			// Otherwise, the relevant branch is read.
-			if len(keys) > 1 {
-				// If more than 1 key is present in the path, the tree must be
-				// traversed deeper.
-				if br.iNode == nil {
-					// If the branch doesn't point to an I-node, no subscribers
-					// exist.
-					return nil, true
-				}
-				// If the branch has an I-node, ilookup is called recursively.
-				return ilookup(br.iNode, keys[1:], i)
+		// Traverse exact-match branch, single-word-wildcard branch, and
+		// zero-or-more-wildcard branch.
+		exact, singleWC, zomWC := main.cNode.getBranches(keys[0], c.config)
+		subs := []Subscriber{}
+		if exact != nil {
+			s, ok := c.bLookup(i, exact, keys)
+			if !ok {
+				return nil, false
 			}
-			// Retrieve the subscribers from the branch.
-			return br.subscribers(), true
+			subs = append(subs, s...)
 		}
+		if singleWC != nil {
+			s, ok := c.bLookup(i, singleWC, keys)
+			if !ok {
+				return nil, false
+			}
+			subs = append(subs, s...)
+		}
+		if zomWC != nil {
+			s, ok := c.bLookup(i, zomWC, keys)
+			if !ok {
+				return nil, false
+			}
+			subs = append(subs, s...)
+		}
+		return subs, true
+	case main.tNode != nil:
+		// TODO
+		return nil, false
 	default:
 		panic("Ctrie is in an invalid state")
 	}
+}
+
+func (c *ctrie) bLookup(parent *iNode, b *branch, keys []string) ([]Subscriber, bool) {
+	if len(keys) > 1 {
+		// If more than 1 key is present in the path, the tree must be
+		// traversed deeper.
+		if b.iNode == nil {
+			// If the branch doesn't point to an I-node, no subscribers
+			// exist.
+			return nil, true
+		}
+		// If the branch has an I-node, ilookup is called recursively.
+		return c.ilookup(b.iNode, keys[1:], parent)
+	}
+	// Retrieve the subscribers from the branch.
+	return b.subscribers(), true
 }

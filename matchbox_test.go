@@ -20,7 +20,7 @@ func TestSubscriptionManager(t *testing.T) {
 	sub3 := subscriber("ghi")
 	sub4 := subscriber("jkl")
 
-	assert.Nil(mb.Subscribers("foo"))
+	assert.Equal([]Subscriber{}, mb.Subscribers("foo"))
 	mb.Unsubscribe("moo", sub1)
 
 	mb.Subscribe("a", sub1)
