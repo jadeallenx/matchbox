@@ -123,6 +123,7 @@ func newCtrie(config *Config) *ctrie {
 
 func (c *ctrie) Insert(topic string, sub Subscriber) {
 	keys := strings.Split(topic, c.config.Delimiter)
+	keys = c.config.reduceZeroOrMoreWildcards(keys)
 	rootPtr := (*unsafe.Pointer)(unsafe.Pointer(&c.root))
 	root := (*iNode)(atomic.LoadPointer(rootPtr))
 	if !iinsert(root, keys, sub, nil) {

@@ -20,6 +20,20 @@ type Config struct {
 	Delimiter          string
 }
 
+// reduceZeroOrMoreWildcards reduces sequences of zero-or-more wildcards,
+// e.g. if zero-or-more wildcard is #, a.#.#.#.b reduces to a.#.b.
+func (c *Config) reduceZeroOrMoreWildcards(words []string) []string {
+	reduced := make([]string, 0, len(words))
+	for i, word := range words {
+		if word == c.ZeroOrMoreWildcard &&
+			i+1 < len(words) && words[i+1] == c.ZeroOrMoreWildcard {
+			continue
+		}
+		reduced = append(reduced, word)
+	}
+	return reduced
+}
+
 // NewAMQPConfig returns a Config which implements the AMQP specification for
 // topic matching.
 func NewAMQPConfig() *Config {
@@ -48,7 +62,7 @@ type matchbox struct {
 }
 
 // NewMatchbox creates a new Matchbox with the given Config.
-func NewMatchbox(config *Config) Matchbox {
+func New(config *Config) Matchbox {
 	return &matchbox{newCtrie(config)}
 }
 
