@@ -146,6 +146,10 @@ func (c *ctrie) Lookup(topic string) []Subscriber {
 	return result
 }
 
+func (c *ctrie) Remove(topic string, sub Subscriber) {
+	// TODO
+}
+
 func iinsert(i *iNode, keys []string, sub Subscriber, parent *iNode) bool {
 	// Linearization point.
 	mainPtr := (*unsafe.Pointer)(unsafe.Pointer(&i.main))

@@ -8,6 +8,7 @@ const (
 
 // Subscriber is the value associated with a topic subscription.
 type Subscriber interface {
+	// ID returns a string which uniquely identifies the Subscriber.
 	ID() string
 }
 
@@ -33,35 +34,35 @@ func NewAMQPConfig() *Config {
 // performing lookups.
 type Matchbox interface {
 	// Subscribe a Subscriber to a topic.
-	Subscribe(subscriber Subscriber, topic string)
+	Subscribe(topic string, subscriber Subscriber)
 
 	// Unsubscribe a Subscriber from a topic.
-	Unsubscribe(subscriber Subscriber, topic string)
+	Unsubscribe(topic string, subscriber Subscriber)
 
 	// Subscribers returns the Subscribers for a topic.
 	Subscribers(topic string) []Subscriber
 }
 
 type matchbox struct {
-	config *Config
+	*ctrie
 }
 
+// NewMatchbox creates a new Matchbox with the given Config.
 func NewMatchbox(config *Config) Matchbox {
-	return &matchbox{config}
+	return &matchbox{newCtrie(config)}
 }
 
 // Subscribe a Subscriber to a topic.
-func (m *matchbox) Subscribe(subscriber Subscriber, topic string) {
-	// TODO
+func (m *matchbox) Subscribe(topic string, subscriber Subscriber) {
+	m.Insert(topic, subscriber)
 }
 
 // Unsubscribe a Subscriber from a topic.
-func (m *matchbox) Unsubscribe(subscriber Subscriber, topic string) {
-	// TODO
+func (m *matchbox) Unsubscribe(topic string, subscriber Subscriber) {
+	m.Remove(topic, subscriber)
 }
 
 // Subscribers returns the Subscribers for a topic.
 func (m *matchbox) Subscribers(topic string) []Subscriber {
-	// TODO
-	return nil
+	return m.Lookup(topic)
 }
