@@ -12,7 +12,7 @@ func (m subscriber) ID() string {
 	return string(m)
 }
 
-func TestSubscriptionManager(t *testing.T) {
+func TestMatchbox(t *testing.T) {
 	assert := assert.New(t)
 	mb := New(NewAMQPConfig())
 	sub1 := subscriber("abc")
@@ -98,6 +98,35 @@ func TestSubscriptionManager(t *testing.T) {
 	assert.Equal([]Subscriber{}, mb.Subscribers("x.a.y.z"))
 	assert.Equal([]Subscriber{}, mb.Subscribers("x.a.a.a.y.z"))
 	assert.Equal([]Subscriber{}, mb.Subscribers("x.a.a.a.y"))
+}
+
+func TestConfig(t *testing.T) {
+	assert := assert.New(t)
+	mb := New(&Config{Delimiter: "|", SingleWildcard: "$", ZeroOrMoreWildcard: "%"})
+	sub := subscriber("abc")
+
+	mb.Subscribe("foo|bar", sub)
+	assert.Equal([]Subscriber{sub}, mb.Subscribers("foo|bar"))
+	mb.Unsubscribe("foo|bar", sub)
+	assert.Equal([]Subscriber{}, mb.Subscribers("foo|bar"))
+
+	mb.Subscribe("foo|%", sub)
+	assert.Equal([]Subscriber{sub}, mb.Subscribers("foo"))
+	assert.Equal([]Subscriber{sub}, mb.Subscribers("foo|bar|baz|qux"))
+	assert.Equal([]Subscriber{}, mb.Subscribers("foo.barblah"))
+	mb.Unsubscribe("foo|%", sub)
+	assert.Equal([]Subscriber{}, mb.Subscribers("foo"))
+	assert.Equal([]Subscriber{}, mb.Subscribers("foo|bar|baz|qux"))
+	assert.Equal([]Subscriber{}, mb.Subscribers("foo.barblah"))
+
+	mb.Subscribe("foo|$|baz", sub)
+	assert.Equal([]Subscriber{sub}, mb.Subscribers("foo|bar|baz"))
+	assert.Equal([]Subscriber{sub}, mb.Subscribers("foo|qux|baz"))
+	assert.Equal([]Subscriber{}, mb.Subscribers("foo|baz"))
+	mb.Unsubscribe("foo|$|baz", sub)
+	assert.Equal([]Subscriber{}, mb.Subscribers("foo|bar|baz"))
+	assert.Equal([]Subscriber{}, mb.Subscribers("foo|qux|baz"))
+	assert.Equal([]Subscriber{}, mb.Subscribers("foo|baz"))
 }
 
 // Ensures reduceZeroOrMoreWildcards reduces sequences of # to a single

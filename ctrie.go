@@ -292,33 +292,45 @@ func (c *ctrie) ilookup(i *iNode, keys []string, parent *iNode, zeroOrMore bool)
 		// Traverse exact-match branch, single-word-wildcard branch, and
 		// zero-or-more-wildcard branch.
 		exact, singleWC, zomWC := main.cNode.getBranches(keys[0], c.config)
-		subs := []Subscriber{}
+		subs := map[string]Subscriber{}
 		if exact != nil {
 			s, ok := c.bLookup(i, exact, keys, false)
 			if !ok {
 				return nil, false
 			}
-			subs = append(subs, s...)
+			for _, sub := range s {
+				subs[sub.ID()] = sub
+			}
 		}
 		if singleWC != nil {
 			s, ok := c.bLookup(i, singleWC, keys, false)
 			if !ok {
 				return nil, false
 			}
-			subs = append(subs, s...)
+			for _, sub := range s {
+				subs[sub.ID()] = sub
+			}
 		}
 		if zomWC != nil {
 			s, ok := c.bLookup(i, zomWC, keys, true)
 			if !ok {
 				return nil, false
 			}
-			subs = append(subs, s...)
+			for _, sub := range s {
+				subs[sub.ID()] = sub
+			}
 		}
 		if zeroOrMore && exact == nil && singleWC == nil && zomWC == nil {
 			// Loopback on zero-or-more wildcard.
 			return c.ilookup(i, keys[1:], parent, true)
 		}
-		return subs, true
+		s := make([]Subscriber, len(subs))
+		i := 0
+		for _, sub := range subs {
+			s[i] = sub
+			i++
+		}
+		return s, true
 	case main.tNode != nil:
 		clean(parent)
 		return nil, false
