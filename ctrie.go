@@ -420,28 +420,35 @@ func clean(i *iNode) {
 	main := (*mainNode)(atomic.LoadPointer(mainPtr))
 	if main.cNode != nil {
 		atomic.CompareAndSwapPointer(mainPtr,
-			unsafe.Pointer(main), unsafe.Pointer(resurrect(main.cNode)))
+			unsafe.Pointer(main), unsafe.Pointer(toCompressed(main.cNode)))
 	}
 }
 
-// resurrect replaces any T-nodes with a resurrected I-node.
-func resurrect(cn *cNode) *mainNode {
+// toCompressed replaces any T-nodes with a resurrected I-node. If the branch
+// pointing to a resurrected I-node doesn't contain any subscriptions, the
+// branch is pruned.
+func toCompressed(cn *cNode) *mainNode {
 	branches := make(map[string]*branch, len(cn.branches))
 	for key, br := range cn.branches {
-		if br.iNode != nil {
-			mainPtr := (*unsafe.Pointer)(unsafe.Pointer(&br.iNode.main))
-			main := (*mainNode)(atomic.LoadPointer(mainPtr))
-			if main.tNode != nil {
-				branches[key] = &branch{
-					subs:  map[string]Subscriber{},
-					iNode: &iNode{main: &mainNode{cNode: &cNode{}}},
-				}
-			} else {
-				branches[key] = br
-			}
-		} else {
-			branches[key] = br
-		}
+		// TODO: A resurrected I-node contains no subscribers, so it should be
+		// safe to prune.
+		branches[key] = resurrect(br)
 	}
 	return &mainNode{cNode: &cNode{branches: branches}}
+}
+
+// resurrect returns a branch which points to a resurrected I-node if it
+// originally pointed to a T-node or returns the branch otherwise.
+func resurrect(br *branch) *branch {
+	if br.iNode != nil {
+		mainPtr := (*unsafe.Pointer)(unsafe.Pointer(&br.iNode.main))
+		main := (*mainNode)(atomic.LoadPointer(mainPtr))
+		if main.tNode != nil {
+			return &branch{
+				subs:  map[string]Subscriber{},
+				iNode: &iNode{main: &mainNode{cNode: &cNode{}}},
+			}
+		}
+	}
+	return br
 }
