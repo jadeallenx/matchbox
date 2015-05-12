@@ -34,13 +34,15 @@ func newCNode(keys []string, sub Subscriber) *cNode {
 			keys[0]: &branch{subs: map[string]Subscriber{sub.ID(): sub}}}}
 	}
 	nin := &iNode{&mainNode{cNode: newCNode(keys[1:], sub)}}
-	return &cNode{branches: map[string]*branch{keys[0]: &branch{subs: map[string]Subscriber{}, iNode: nin}}}
+	return &cNode{branches: map[string]*branch{
+		keys[0]: &branch{subs: map[string]Subscriber{}, iNode: nin}},
+	}
 }
 
 // inserted returns a copy of this C-node with the specified Subscriber
 // inserted.
 func (c *cNode) inserted(keys []string, sub Subscriber) *cNode {
-	branches := make(map[string]*branch, len(c.branches))
+	branches := make(map[string]*branch, len(c.branches)+1)
 	for key, branch := range c.branches {
 		branches[key] = branch
 	}
@@ -85,6 +87,27 @@ func (c *cNode) updated(key string, sub Subscriber) *cNode {
 	return &cNode{branches: branches}
 }
 
+// removed returns a copy of this C-node with the Subscriber removed from the
+// corresponding branch.
+func (c *cNode) removed(key string, sub Subscriber) *cNode {
+	branches := make(map[string]*branch, len(c.branches))
+	for key, branch := range c.branches {
+		branches[key] = branch
+	}
+	br, ok := branches[key]
+	if ok {
+		br = br.removed(sub)
+		if len(br.subs) == 0 && br.iNode == nil {
+			// Remove the branch if it contains no subscribers and doesn't
+			// point anywhere.
+			delete(branches, key)
+		} else {
+			branches[key] = br
+		}
+	}
+	return &cNode{branches: branches}
+}
+
 // getBranches returns the branches for the given key. There are three
 // possible branches: exact match, single wildcard, and zero-or-more wildcard.
 func (c *cNode) getBranches(key string, config *Config) (*branch, *branch, *branch) {
@@ -99,9 +122,7 @@ func (c *cNode) getBranch(key string) *branch {
 
 // tNode is tomb node which is a special node used to ensure proper ordering
 // during removals.
-type tNode struct {
-	// TODO
-}
+type tNode struct{}
 
 // branch is either an iNode or sNode.
 type branch struct {
@@ -116,6 +137,16 @@ func (b *branch) updated(in *iNode) *branch {
 		subs[id] = sub
 	}
 	return &branch{subs: subs, iNode: in}
+}
+
+// removed returns a copy of this branch with the given Subscriber removed.
+func (b *branch) removed(sub Subscriber) *branch {
+	subs := make(map[string]Subscriber, len(b.subs))
+	for id, sub := range b.subs {
+		subs[id] = sub
+	}
+	delete(subs, sub.ID())
+	return &branch{subs: subs, iNode: b.iNode}
 }
 
 func (b *branch) subscribers() []Subscriber {
@@ -147,7 +178,7 @@ func (c *ctrie) Lookup(topic string) []Subscriber {
 	keys := strings.Split(topic, c.config.Delimiter)
 	rootPtr := (*unsafe.Pointer)(unsafe.Pointer(&c.root))
 	root := (*iNode)(atomic.LoadPointer(rootPtr))
-	result, ok := c.ilookup(root, keys, nil)
+	result, ok := c.ilookup(root, keys, nil, false)
 	if !ok {
 		return c.Lookup(topic)
 	}
@@ -155,7 +186,13 @@ func (c *ctrie) Lookup(topic string) []Subscriber {
 }
 
 func (c *ctrie) Remove(topic string, sub Subscriber) {
-	// TODO
+	keys := strings.Split(topic, c.config.Delimiter)
+	keys = c.config.reduceZeroOrMoreWildcards(keys)
+	rootPtr := (*unsafe.Pointer)(unsafe.Pointer(&c.root))
+	root := (*iNode)(atomic.LoadPointer(rootPtr))
+	if !c.iremove(root, keys, sub, nil) {
+		c.Remove(topic, sub)
+	}
 }
 
 func (c *ctrie) iinsert(i *iNode, keys []string, sub Subscriber, parent *iNode) bool {
@@ -165,9 +202,9 @@ func (c *ctrie) iinsert(i *iNode, keys []string, sub Subscriber, parent *iNode) 
 	switch {
 	case main.cNode != nil:
 		cn := main.cNode
-		if br, ok := cn.branches[keys[0]]; !ok {
-			// If the relevant bit is not in the map, a copy of the C-node with
-			// the new entry is created. The linearization point is a
+		if br := cn.getBranch(keys[0]); br == nil {
+			// If the relevant branch is not in the map, a copy of the C-node
+			// with the new entry is created. The linearization point is a
 			// successful CAS.
 			ncn := &mainNode{cNode: cn.inserted(keys, sub)}
 			return atomic.CompareAndSwapPointer(
@@ -183,7 +220,7 @@ func (c *ctrie) iinsert(i *iNode, keys []string, sub Subscriber, parent *iNode) 
 					// recursively.
 					return c.iinsert(br.iNode, keys[1:], sub, i)
 				}
-				// Otherwise, an I-Node which points to a new C-node must be
+				// Otherwise, an I-node which points to a new C-node must be
 				// added. The linearization point is a successful CAS.
 				nin := &iNode{&mainNode{cNode: newCNode(keys[1:], sub)}}
 				ncn := &mainNode{cNode: cn.updatedBranch(keys[0], nin, br)}
@@ -197,14 +234,56 @@ func (c *ctrie) iinsert(i *iNode, keys []string, sub Subscriber, parent *iNode) 
 				mainPtr, unsafe.Pointer(main), unsafe.Pointer(ncn))
 		}
 	case main.tNode != nil:
-		// TODO
+		clean(parent)
 		return false
 	default:
 		panic("Ctrie is in an invalid state")
 	}
 }
 
-func (c *ctrie) ilookup(i *iNode, keys []string, parent *iNode) ([]Subscriber, bool) {
+func (c *ctrie) iremove(i *iNode, keys []string, sub Subscriber, parent *iNode) bool {
+	// Linearization point.
+	mainPtr := (*unsafe.Pointer)(unsafe.Pointer(&i.main))
+	main := (*mainNode)(atomic.LoadPointer(mainPtr))
+	switch {
+	case main.cNode != nil:
+		cn := main.cNode
+		if br := cn.getBranch(keys[0]); br == nil {
+			// If the relevant key is not in the map, the subscription doesn't
+			// exist.
+			return true
+		} else {
+			// If the relevant key is present in the map, its corresponding
+			// branch is read.
+			if len(keys) > 1 {
+				// If more than 1 key is present in the path, the tree must be
+				// traversed deeper.
+				if br.iNode != nil {
+					// If the branch has an I-node, iremove is called
+					// recursively.
+					return c.iremove(br.iNode, keys[1:], sub, i)
+				}
+				// Otherwise, the subscription doesn't exist.
+				return true
+			}
+			// Remove the Subscriber by copying the C-node without it. A
+			// contraction of the copy is then created. A successful CAS will
+			// substitute the old C-node with the copied C-node, thus removing
+			// the Subscriber from the trie - this is the linearization point.
+			ncn := cn.removed(keys[0], sub)
+			cntr := c.toContracted(ncn, i)
+			return atomic.CompareAndSwapPointer(
+				mainPtr, unsafe.Pointer(main), unsafe.Pointer(cntr))
+		}
+	case main.tNode != nil:
+		clean(parent)
+		return false
+	default:
+		panic("Ctrie is in an invalid state")
+	}
+}
+
+func (c *ctrie) ilookup(i *iNode, keys []string, parent *iNode, zeroOrMore bool) ([]Subscriber, bool) {
 	// Linearization point.
 	mainPtr := (*unsafe.Pointer)(unsafe.Pointer(&i.main))
 	main := (*mainNode)(atomic.LoadPointer(mainPtr))
@@ -215,47 +294,142 @@ func (c *ctrie) ilookup(i *iNode, keys []string, parent *iNode) ([]Subscriber, b
 		exact, singleWC, zomWC := main.cNode.getBranches(keys[0], c.config)
 		subs := []Subscriber{}
 		if exact != nil {
-			s, ok := c.bLookup(i, exact, keys)
+			s, ok := c.bLookup(i, exact, keys, false)
 			if !ok {
 				return nil, false
 			}
 			subs = append(subs, s...)
 		}
 		if singleWC != nil {
-			s, ok := c.bLookup(i, singleWC, keys)
+			s, ok := c.bLookup(i, singleWC, keys, false)
 			if !ok {
 				return nil, false
 			}
 			subs = append(subs, s...)
 		}
 		if zomWC != nil {
-			s, ok := c.bLookup(i, zomWC, keys)
+			s, ok := c.bLookup(i, zomWC, keys, true)
 			if !ok {
 				return nil, false
 			}
 			subs = append(subs, s...)
 		}
+		if zeroOrMore && exact == nil && singleWC == nil && zomWC == nil {
+			// Loopback on zero-or-more wildcard.
+			return c.ilookup(i, keys[1:], parent, true)
+		}
 		return subs, true
 	case main.tNode != nil:
-		// TODO
+		clean(parent)
 		return nil, false
 	default:
 		panic("Ctrie is in an invalid state")
 	}
 }
 
-func (c *ctrie) bLookup(parent *iNode, b *branch, keys []string) ([]Subscriber, bool) {
+func (c *ctrie) bLookup(parent *iNode, b *branch, keys []string, zeroOrMore bool) ([]Subscriber, bool) {
 	if len(keys) > 1 {
 		// If more than 1 key is present in the path, the tree must be
 		// traversed deeper.
 		if b.iNode == nil {
+			if zeroOrMore {
+				// Loopback on zero-or-more wildcard.
+				return c.bLookup(parent, b, keys[1:], true)
+			}
 			// If the branch doesn't point to an I-node, no subscribers
 			// exist.
 			return nil, true
 		}
 		// If the branch has an I-node, ilookup is called recursively.
-		return c.ilookup(b.iNode, keys[1:], parent)
+		return c.ilookup(b.iNode, keys[1:], parent, zeroOrMore)
 	}
+
 	// Retrieve the subscribers from the branch.
-	return b.subscribers(), true
+	subscribers := b.subscribers()
+
+	// Is there a zero-or-more wildcard following this node? If so, get its
+	// subscribers.
+	if b.iNode != nil {
+		subscribers = append(subscribers,
+			c.getZeroOrMoreWildcardSubscribers(b.iNode)...)
+	}
+
+	// Were we looping on a zero-or-more wildcard? If so, check for the tail
+	// and get its subscribers.
+	if zeroOrMore && b.iNode != nil {
+		subscribers = append(subscribers, c.getSubscribers(b.iNode, keys[0])...)
+	}
+
+	return subscribers, true
+}
+
+func (c *ctrie) getZeroOrMoreWildcardSubscribers(i *iNode) []Subscriber {
+	mainPtr := (*unsafe.Pointer)(unsafe.Pointer(&i.main))
+	main := (*mainNode)(atomic.LoadPointer(mainPtr))
+	if main.cNode != nil {
+		if br := main.cNode.getBranch(c.config.ZeroOrMoreWildcard); br != nil {
+			return br.subscribers()
+		}
+	}
+	return nil
+}
+
+func (c *ctrie) getSubscribers(i *iNode, key string) []Subscriber {
+	mainPtr := (*unsafe.Pointer)(unsafe.Pointer(&i.main))
+	main := (*mainNode)(atomic.LoadPointer(mainPtr))
+	exact, singleWC, zomWC := main.cNode.getBranches(key, c.config)
+	subs := []Subscriber{}
+	if exact != nil {
+		subs = append(subs, exact.subscribers()...)
+	}
+	if singleWC != nil {
+		subs = append(subs, singleWC.subscribers()...)
+	}
+	if zomWC != nil {
+		subs = append(subs, zomWC.subscribers()...)
+	}
+	return subs
+}
+
+// toContracted ensures that every I-node except the root points to a C-node
+// with at least one branch or a T-node. If a given C-node has no branches and
+// is not at the root level, a T-node is returned.
+func (c *ctrie) toContracted(cn *cNode, parent *iNode) *mainNode {
+	if c.root != parent && len(cn.branches) == 0 {
+		return &mainNode{tNode: &tNode{}}
+	}
+	return &mainNode{cNode: cn}
+}
+
+// clean replaces an I-node's C-node with a copy that has any tombed I-nodes
+// resurrected.
+func clean(i *iNode) {
+	mainPtr := (*unsafe.Pointer)(unsafe.Pointer(&i.main))
+	main := (*mainNode)(atomic.LoadPointer(mainPtr))
+	if main.cNode != nil {
+		atomic.CompareAndSwapPointer(mainPtr,
+			unsafe.Pointer(main), unsafe.Pointer(resurrect(main.cNode)))
+	}
+}
+
+// resurrect replaces any T-nodes with a resurrected I-node.
+func resurrect(cn *cNode) *mainNode {
+	branches := make(map[string]*branch, len(cn.branches))
+	for key, br := range cn.branches {
+		if br.iNode != nil {
+			mainPtr := (*unsafe.Pointer)(unsafe.Pointer(&br.iNode.main))
+			main := (*mainNode)(atomic.LoadPointer(mainPtr))
+			if main.tNode != nil {
+				branches[key] = &branch{
+					subs:  map[string]Subscriber{},
+					iNode: &iNode{main: &mainNode{cNode: &cNode{}}},
+				}
+			} else {
+				branches[key] = br
+			}
+		} else {
+			branches[key] = br
+		}
+	}
+	return &mainNode{cNode: &cNode{branches: branches}}
 }
