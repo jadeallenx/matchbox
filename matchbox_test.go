@@ -1,6 +1,8 @@
 package matchbox
 
 import (
+	"strconv"
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -178,5 +180,175 @@ func BenchmarkSubscribeFanOutChild(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		mb.Subscribe("g.h", sub)
+	}
+}
+
+func BenchmarkMultithreaded5050Insert1Threads(b *testing.B) {
+	numItems := 1000
+	numThreads := 1
+	benchmark5050(b, numItems, numThreads)
+}
+
+func BenchmarkMultithreaded5050Insert2Threads(b *testing.B) {
+	numItems := 1000
+	numThreads := 2
+	benchmark5050(b, numItems, numThreads)
+}
+
+func BenchmarkMultithreaded5050Insert3Threads(b *testing.B) {
+	numItems := 1000
+	numThreads := 3
+	benchmark5050(b, numItems, numThreads)
+}
+
+func BenchmarkMultithreaded5050Insert4Threads(b *testing.B) {
+	numItems := 1000
+	numThreads := 4
+	benchmark5050(b, numItems, numThreads)
+}
+
+func BenchmarkMultithreaded5050Insert5Threads(b *testing.B) {
+	numItems := 1000
+	numThreads := 5
+	benchmark5050(b, numItems, numThreads)
+}
+
+func BenchmarkMultithreaded5050Insert6Threads(b *testing.B) {
+	numItems := 1000
+	numThreads := 6
+	benchmark5050(b, numItems, numThreads)
+}
+
+func BenchmarkMultithreaded5050Insert7Threads(b *testing.B) {
+	numItems := 1000
+	numThreads := 7
+	benchmark5050(b, numItems, numThreads)
+}
+
+func BenchmarkMultithreaded5050Insert8Threads(b *testing.B) {
+	numItems := 1000
+	numThreads := 8
+	benchmark5050(b, numItems, numThreads)
+}
+
+func BenchmarkMultithreaded2575Insert1Threads(b *testing.B) {
+	numItems := 1000
+	numThreads := 1
+	benchmark2575(b, numItems, numThreads)
+}
+
+func BenchmarkMultithreaded2575Insert2Threads(b *testing.B) {
+	numItems := 1000
+	numThreads := 2
+	benchmark2575(b, numItems, numThreads)
+}
+
+func BenchmarkMultithreaded2575Insert3Threads(b *testing.B) {
+	numItems := 1000
+	numThreads := 3
+	benchmark2575(b, numItems, numThreads)
+}
+
+func BenchmarkMultithreaded2575Insert4Threads(b *testing.B) {
+	numItems := 1000
+	numThreads := 4
+	benchmark2575(b, numItems, numThreads)
+}
+
+func BenchmarkMultithreaded2575Insert5Threads(b *testing.B) {
+	numItems := 1000
+	numThreads := 5
+	benchmark2575(b, numItems, numThreads)
+}
+
+func BenchmarkMultithreaded2575Insert6Threads(b *testing.B) {
+	numItems := 1000
+	numThreads := 6
+	benchmark2575(b, numItems, numThreads)
+}
+
+func BenchmarkMultithreaded2575Insert7Threads(b *testing.B) {
+	numItems := 1000
+	numThreads := 7
+	benchmark2575(b, numItems, numThreads)
+}
+
+func BenchmarkMultithreaded2575Insert8Threads(b *testing.B) {
+	numItems := 1000
+	numThreads := 8
+	benchmark2575(b, numItems, numThreads)
+}
+
+func benchmark5050(b *testing.B, numItems, numThreads int) {
+	itemsToInsert := make([][]string, 0, numThreads)
+	for i := 0; i < numThreads; i++ {
+		items := make([]string, 0, numItems)
+		for j := 0; j < numItems; j++ {
+			topic := strconv.Itoa(j%10) + "." + strconv.Itoa(j%50) + "." + strconv.Itoa(j)
+			items = append(items, topic)
+		}
+		itemsToInsert = append(itemsToInsert, items)
+	}
+
+	var wg sync.WaitGroup
+	mb := New(NewAMQPConfig())
+	sub := subscriber("abc")
+	b.ResetTimer()
+
+	for i := 0; i < b.N; i++ {
+		wg.Add(numThreads)
+		for j := 0; j < numThreads; j++ {
+			go func(j int) {
+				if j%2 != 0 {
+					for _, key := range itemsToInsert[j] {
+						mb.Subscribe(key, sub)
+					}
+				} else {
+					for _, key := range itemsToInsert[j] {
+						mb.Subscribers(key)
+					}
+				}
+
+				wg.Done()
+			}(j)
+		}
+		wg.Wait()
+	}
+}
+
+func benchmark2575(b *testing.B, numItems, numThreads int) {
+	itemsToInsert := make([][]string, 0, numThreads)
+	for i := 0; i < numThreads; i++ {
+		items := make([]string, 0, numItems)
+		for j := 0; j < numItems; j++ {
+			topic := strconv.Itoa(j%10) + "." + strconv.Itoa(j%50) + "." + strconv.Itoa(j)
+			items = append(items, topic)
+		}
+		itemsToInsert = append(itemsToInsert, items)
+	}
+
+	var wg sync.WaitGroup
+	mb := New(NewAMQPConfig())
+	sub := subscriber("abc")
+	b.ResetTimer()
+
+	for i := 0; i < b.N; i++ {
+		wg.Add(numThreads)
+		for j := 0; j < numThreads; j++ {
+			go func(j int) {
+				if j%4 == 0 {
+					for _, key := range itemsToInsert[j] {
+						mb.Subscribe(key, sub)
+					}
+				} else {
+					for _, key := range itemsToInsert[j] {
+						mb.Subscribers(key)
+					}
+				}
+
+				wg.Done()
+			}(j)
+		}
+		wg.Wait()
 	}
 }
