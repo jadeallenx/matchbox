@@ -19,15 +19,19 @@ type iNode struct {
 	main *mainNode
 }
 
+// mainNode is either a C-node or T-node to which an I-node points.
 type mainNode struct {
 	cNode *cNode
 	tNode *tNode
 }
 
+// cNode is an internal main node containing a map of branches keyed on
+// subscription components.
 type cNode struct {
 	branches map[string]*branch
 }
 
+// newCNode creates a new C-node with the given subscription path.
 func newCNode(keys []string, sub Subscriber) *cNode {
 	if len(keys) == 1 {
 		return &cNode{branches: map[string]*branch{
@@ -124,7 +128,7 @@ func (c *cNode) getBranch(key string) *branch {
 // during removals.
 type tNode struct{}
 
-// branch is either an iNode or sNode.
+// branch contains subscribers and, optionally, points to an I-node.
 type branch struct {
 	iNode *iNode
 	subs  map[string]Subscriber
@@ -149,6 +153,7 @@ func (b *branch) removed(sub Subscriber) *branch {
 	return &branch{subs: subs, iNode: b.iNode}
 }
 
+// subscribers returns the Subscribers for this branch.
 func (b *branch) subscribers() []Subscriber {
 	subs := make([]Subscriber, len(b.subs))
 	i := 0
@@ -159,11 +164,13 @@ func (b *branch) subscribers() []Subscriber {
 	return subs
 }
 
+// newCtrie creates a new ctrie with the given Config.
 func newCtrie(config *Config) *ctrie {
 	root := &iNode{main: &mainNode{cNode: &cNode{}}}
 	return &ctrie{root: root, config: config}
 }
 
+// Insert adds the Subscriber to the ctrie for the given topic.
 func (c *ctrie) Insert(topic string, sub Subscriber) {
 	keys := strings.Split(topic, c.config.Delimiter)
 	keys = c.config.reduceZeroOrMoreWildcards(keys)
@@ -174,6 +181,7 @@ func (c *ctrie) Insert(topic string, sub Subscriber) {
 	}
 }
 
+// Lookup returns the Subscribers for the given topic.
 func (c *ctrie) Lookup(topic string) []Subscriber {
 	keys := strings.Split(topic, c.config.Delimiter)
 	rootPtr := (*unsafe.Pointer)(unsafe.Pointer(&c.root))
@@ -185,6 +193,7 @@ func (c *ctrie) Lookup(topic string) []Subscriber {
 	return result
 }
 
+// Remove will remove the Subscriber from the topic if it is subscribed.
 func (c *ctrie) Remove(topic string, sub Subscriber) {
 	keys := strings.Split(topic, c.config.Delimiter)
 	keys = c.config.reduceZeroOrMoreWildcards(keys)
@@ -195,6 +204,8 @@ func (c *ctrie) Remove(topic string, sub Subscriber) {
 	}
 }
 
+// iinsert attempts to add the Subscriber to the key path. True is returned if
+// the Subscriber was added, false if the operation needs to be retried.
 func (c *ctrie) iinsert(i *iNode, keys []string, sub Subscriber, parent *iNode) bool {
 	// Linearization point.
 	mainPtr := (*unsafe.Pointer)(unsafe.Pointer(&i.main))
@@ -241,6 +252,9 @@ func (c *ctrie) iinsert(i *iNode, keys []string, sub Subscriber, parent *iNode) 
 	}
 }
 
+// iremove attempts to remove the Subscriber from the key path. True is
+// returned if the Subscriber was removed (or didn't exist), false if the
+// operation needs to be retried.
 func (c *ctrie) iremove(i *iNode, keys []string, sub Subscriber, parent *iNode) bool {
 	// Linearization point.
 	mainPtr := (*unsafe.Pointer)(unsafe.Pointer(&i.main))
@@ -283,6 +297,9 @@ func (c *ctrie) iremove(i *iNode, keys []string, sub Subscriber, parent *iNode) 
 	}
 }
 
+// ilookup attempts to retrieve the Subscribers for the key path. True is
+// returned if the Subscribers were retrieved, false if the operation needs to
+// be retried.
 func (c *ctrie) ilookup(i *iNode, keys []string, parent *iNode, zeroOrMore bool) ([]Subscriber, bool) {
 	// Linearization point.
 	mainPtr := (*unsafe.Pointer)(unsafe.Pointer(&i.main))
@@ -339,6 +356,9 @@ func (c *ctrie) ilookup(i *iNode, keys []string, parent *iNode, zeroOrMore bool)
 	}
 }
 
+// bLookup attempts to retrieve the Subscribers from the key path along the
+// given branch. True is returned if the Subscribers were retrieved, false if
+// the operation needs to be retried.
 func (c *ctrie) bLookup(parent *iNode, b *branch, keys []string, zeroOrMore bool) ([]Subscriber, bool) {
 	if len(keys) > 1 {
 		// If more than 1 key is present in the path, the tree must be
@@ -375,6 +395,8 @@ func (c *ctrie) bLookup(parent *iNode, b *branch, keys []string, zeroOrMore bool
 	return subscribers, true
 }
 
+// getZeroOrMoreWildcardSubscribers returns the Subscribers on the I-node's
+// C-node's zero-or-more-wildcard branch, if it exists.
 func (c *ctrie) getZeroOrMoreWildcardSubscribers(i *iNode) []Subscriber {
 	mainPtr := (*unsafe.Pointer)(unsafe.Pointer(&i.main))
 	main := (*mainNode)(atomic.LoadPointer(mainPtr))
@@ -386,19 +408,23 @@ func (c *ctrie) getZeroOrMoreWildcardSubscribers(i *iNode) []Subscriber {
 	return nil
 }
 
+// getSubscribers returns the Subscribers for the given key on the I-node's
+// C-node, if it exists.
 func (c *ctrie) getSubscribers(i *iNode, key string) []Subscriber {
 	mainPtr := (*unsafe.Pointer)(unsafe.Pointer(&i.main))
 	main := (*mainNode)(atomic.LoadPointer(mainPtr))
-	exact, singleWC, zomWC := main.cNode.getBranches(key, c.config)
 	subs := []Subscriber{}
-	if exact != nil {
-		subs = append(subs, exact.subscribers()...)
-	}
-	if singleWC != nil {
-		subs = append(subs, singleWC.subscribers()...)
-	}
-	if zomWC != nil {
-		subs = append(subs, zomWC.subscribers()...)
+	if main.cNode != nil {
+		exact, singleWC, zomWC := main.cNode.getBranches(key, c.config)
+		if exact != nil {
+			subs = append(subs, exact.subscribers()...)
+		}
+		if singleWC != nil {
+			subs = append(subs, singleWC.subscribers()...)
+		}
+		if zomWC != nil {
+			subs = append(subs, zomWC.subscribers()...)
+		}
 	}
 	return subs
 }
