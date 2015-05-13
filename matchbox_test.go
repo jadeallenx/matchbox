@@ -183,6 +183,80 @@ func BenchmarkSubscribeFanOutChild(b *testing.B) {
 	}
 }
 
+func BenchmarkUnsubscribeSingleChild(b *testing.B) {
+	mb := New(NewAMQPConfig())
+	sub := subscriber("abc")
+	mb.Subscribe("a", sub)
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		mb.Unsubscribe("a", sub)
+	}
+}
+
+func BenchmarkUnsubscribeLongBranch(b *testing.B) {
+	mb := New(NewAMQPConfig())
+	sub := subscriber("abc")
+	mb.Subscribe("a.b.c.d.e.f.g.h", sub)
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		mb.Unsubscribe("a.b.c.d.e.f.g.h", sub)
+	}
+}
+
+func BenchmarkUnsubscribeFanOutChild(b *testing.B) {
+	mb := New(NewAMQPConfig())
+	sub := subscriber("abc")
+	mb.Subscribe("a", sub)
+	mb.Subscribe("b", sub)
+	mb.Subscribe("c", sub)
+	mb.Subscribe("d", sub)
+	mb.Subscribe("e", sub)
+	mb.Subscribe("f", sub)
+	mb.Subscribe("g", sub)
+	mb.Subscribe("h", sub)
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		mb.Unsubscribe("h", sub)
+	}
+}
+
+func BenchmarkSubscribersSingleChild(b *testing.B) {
+	mb := New(NewAMQPConfig())
+	sub := subscriber("abc")
+	mb.Subscribe("a", sub)
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		mb.Subscribers("a")
+	}
+}
+
+func BenchmarkSubscribersLongBranch(b *testing.B) {
+	mb := New(NewAMQPConfig())
+	sub := subscriber("abc")
+	mb.Subscribe("a.b.c.d.e.f.g.h", sub)
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		mb.Subscribers("a.b.c.d.e.f.g.h")
+	}
+}
+
+func BenchmarkSubscribersFanOutChild(b *testing.B) {
+	mb := New(NewAMQPConfig())
+	sub := subscriber("abc")
+	mb.Subscribe("a", sub)
+	mb.Subscribe("b", sub)
+	mb.Subscribe("c", sub)
+	mb.Subscribe("d", sub)
+	mb.Subscribe("e", sub)
+	mb.Subscribe("f", sub)
+	mb.Subscribe("g", sub)
+	mb.Subscribe("h", sub)
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		mb.Subscribers("h")
+	}
+}
+
 func BenchmarkMultithreaded5050Insert1Threads(b *testing.B) {
 	numItems := 1000
 	numThreads := 1
@@ -231,6 +305,18 @@ func BenchmarkMultithreaded5050Insert8Threads(b *testing.B) {
 	benchmark5050(b, numItems, numThreads)
 }
 
+func BenchmarkMultithreaded5050Insert12Threads(b *testing.B) {
+	numItems := 1000
+	numThreads := 12
+	benchmark5050(b, numItems, numThreads)
+}
+
+func BenchmarkMultithreaded5050Insert16Threads(b *testing.B) {
+	numItems := 1000
+	numThreads := 16
+	benchmark5050(b, numItems, numThreads)
+}
+
 func BenchmarkMultithreaded2575Insert1Threads(b *testing.B) {
 	numItems := 1000
 	numThreads := 1
@@ -276,6 +362,18 @@ func BenchmarkMultithreaded2575Insert7Threads(b *testing.B) {
 func BenchmarkMultithreaded2575Insert8Threads(b *testing.B) {
 	numItems := 1000
 	numThreads := 8
+	benchmark2575(b, numItems, numThreads)
+}
+
+func BenchmarkMultithreaded2575Insert12Threads(b *testing.B) {
+	numItems := 1000
+	numThreads := 12
+	benchmark2575(b, numItems, numThreads)
+}
+
+func BenchmarkMultithreaded2575Insert16Threads(b *testing.B) {
+	numItems := 1000
+	numThreads := 16
 	benchmark2575(b, numItems, numThreads)
 }
 
