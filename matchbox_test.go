@@ -21,6 +21,7 @@ func TestMatchbox(t *testing.T) {
 	sub2 := subscriber("def")
 	sub3 := subscriber("ghi")
 	sub4 := subscriber("jkl")
+	sub5 := subscriber("mno")
 
 	assert.Equal([]Subscriber{}, mb.Subscribers("foo"))
 	mb.Unsubscribe("moo", sub1)
@@ -38,13 +39,15 @@ func TestMatchbox(t *testing.T) {
 	mb.Subscribe("a.*.c", sub2)
 	mb.Subscribe("*.*.c", sub3)
 	mb.Subscribe("*.*.*", sub4)
+	mb.Subscribe("a.b.c", sub5)
 	subscribers := mb.Subscribers("a.b.c")
-	sessions := []Subscriber{sub1, sub2, sub3, sub4}
-	assert.Len(subscribers, 4)
+	sessions := []Subscriber{sub1, sub2, sub3, sub4, sub5}
+	assert.Len(subscribers, 5)
 	for _, subscriber := range subscribers {
 		assert.Contains(sessions, subscriber)
 	}
 	mb.Unsubscribe("a.b.c", sub1)
+	mb.Unsubscribe("a.b.c", sub5)
 	sessions = []Subscriber{sub2, sub3, sub4}
 	subscribers = mb.Subscribers("a.b.c")
 	assert.Len(subscribers, 3)
