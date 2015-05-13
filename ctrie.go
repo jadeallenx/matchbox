@@ -337,7 +337,7 @@ func (c *ctrie) ilookup(i *iNode, keys []string, parent *iNode, zeroOrMore bool)
 				subs[sub.ID()] = sub
 			}
 		}
-		if zeroOrMore && exact == nil && singleWC == nil && zomWC == nil {
+		if zeroOrMore && len(keys) > 1 && exact == nil && singleWC == nil && zomWC == nil {
 			// Loopback on zero-or-more wildcard.
 			return c.ilookup(i, keys[1:], parent, true)
 		}
@@ -450,31 +450,29 @@ func clean(i *iNode) {
 	}
 }
 
-// toCompressed replaces any T-nodes with a resurrected I-node. If the branch
-// pointing to a resurrected I-node doesn't contain any subscriptions, the
-// branch is pruned.
+// toCompressed prunes any branches to tombed I-nodes and returns the
+// compressed main node.
 func toCompressed(cn *cNode) *mainNode {
 	branches := make(map[string]*branch, len(cn.branches))
 	for key, br := range cn.branches {
-		// TODO: A resurrected I-node contains no subscribers, so it should be
-		// safe to prune.
-		branches[key] = resurrect(br)
+		if !prunable(br) {
+			branches[key] = br
+		}
 	}
 	return &mainNode{cNode: &cNode{branches: branches}}
 }
 
-// resurrect returns a branch which points to a resurrected I-node if it
-// originally pointed to a T-node or returns the branch otherwise.
-func resurrect(br *branch) *branch {
-	if br.iNode != nil {
-		mainPtr := (*unsafe.Pointer)(unsafe.Pointer(&br.iNode.main))
-		main := (*mainNode)(atomic.LoadPointer(mainPtr))
-		if main.tNode != nil {
-			return &branch{
-				subs:  map[string]Subscriber{},
-				iNode: &iNode{main: &mainNode{cNode: &cNode{}}},
-			}
-		}
+// prunable indicates if the branch can be pruned. A branch can be pruned if
+// it has no subscribers and points to nowhere or it has no subscribers and
+// points to a tombed I-node.
+func prunable(br *branch) bool {
+	if len(br.subs) > 0 {
+		return false
 	}
-	return br
+	if br.iNode == nil {
+		return true
+	}
+	mainPtr := (*unsafe.Pointer)(unsafe.Pointer(&br.iNode.main))
+	main := (*mainNode)(atomic.LoadPointer(mainPtr))
+	return main.tNode != nil
 }
