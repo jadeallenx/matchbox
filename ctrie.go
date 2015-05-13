@@ -238,6 +238,10 @@ func (c *ctrie) iinsert(i *iNode, keys []string, sub Subscriber, parent *iNode) 
 				return atomic.CompareAndSwapPointer(
 					mainPtr, unsafe.Pointer(main), unsafe.Pointer(ncn))
 			}
+			if _, ok := br.subs[sub.ID()]; ok {
+				// Already subscribed.
+				return true
+			}
 			// Insert the Subscriber by copying the C-node and updating the
 			// respective branch. The linearization point is a successful CAS.
 			ncn := &mainNode{cNode: cn.updated(keys[0], sub)}
@@ -278,6 +282,10 @@ func (c *ctrie) iremove(i *iNode, keys []string, sub Subscriber, parent *iNode) 
 					return c.iremove(br.iNode, keys[1:], sub, i)
 				}
 				// Otherwise, the subscription doesn't exist.
+				return true
+			}
+			if _, ok := br.subs[sub.ID()]; !ok {
+				// Not subscribed.
 				return true
 			}
 			// Remove the Subscriber by copying the C-node without it. A
