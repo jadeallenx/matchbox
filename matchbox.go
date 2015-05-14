@@ -58,6 +58,9 @@ type Matchbox interface {
 
 	// Subscriptions returns a map of topics to Subscribers.
 	Subscriptions() map[string][]Subscriber
+
+	// Topics returns all of the currently contained topics.
+	Topics() []string
 }
 
 // matchbox implements the Matchbox interface using a backing concurrent trie.
@@ -105,4 +108,25 @@ func (m *matchbox) subscriptions(subscriptions map[string][]Subscriber, path str
 			m.subscriptions(subscriptions, path+m.config.Delimiter+key, br)
 		}
 	}
+}
+
+// Topics returns all of the currently contained topics.
+func (m *matchbox) Topics() []string {
+	snapshot := m.ReadOnlySnapshot()
+	topics := []string{}
+	root := snapshot.root.main.cNode
+	for key, br := range root.branches {
+		topics = append(topics, m.topics(key, br)...)
+	}
+	return topics
+}
+
+func (m *matchbox) topics(path string, br *branch) []string {
+	topics := []string{path}
+	if br.iNode != nil && br.iNode.main.cNode != nil {
+		for key, br := range br.iNode.main.cNode.branches {
+			topics = append(topics, m.topics(path+m.config.Delimiter+key, br)...)
+		}
+	}
+	return topics
 }

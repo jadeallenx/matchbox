@@ -172,6 +172,28 @@ func TestSubscriptions(t *testing.T) {
 	}
 }
 
+func TestTopics(t *testing.T) {
+	assert := assert.New(t)
+	mb := New(NewAMQPConfig())
+	assert.Equal([]string{}, mb.Topics())
+	sub := subscriber("abc")
+	mb.Subscribe("a", sub)
+	mb.Subscribe("b", sub)
+	mb.Subscribe("a.b.c", sub)
+	mb.Subscribe("a.#.c", sub)
+	mb.Subscribe("a.*.c", sub)
+
+	topics := mb.Topics()
+
+	expected := []string{"a", "b", "a.b", "a.b.c", "a.#", "a.*", "a.#.c", "a.*.c"}
+
+	if assert.Len(topics, len(expected)) {
+		for _, actual := range topics {
+			assert.Contains(expected, actual)
+		}
+	}
+}
+
 // Ensures reduceZeroOrMoreWildcards reduces sequences of # to a single
 // instance.
 func TestReduceZeroOrMoreWildcards(t *testing.T) {
