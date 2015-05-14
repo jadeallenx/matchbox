@@ -134,6 +134,66 @@ func TestConfig(t *testing.T) {
 	assert.Equal([]Subscriber{}, mb.Subscribers("foo|baz"))
 }
 
+func TestSubscriptions(t *testing.T) {
+	assert := assert.New(t)
+	mb := New(NewAMQPConfig())
+	assert.Equal(map[string][]Subscriber{}, mb.Subscriptions())
+	sub1 := subscriber("abc")
+	sub2 := subscriber("def")
+	sub3 := subscriber("ghi")
+	sub4 := subscriber("jkl")
+	sub5 := subscriber("mno")
+	mb.Subscribe("a", sub1)
+	mb.Subscribe("a", sub2)
+	mb.Subscribe("b", sub1)
+	mb.Subscribe("a.b", sub3)
+	mb.Subscribe("a.b", sub4)
+	mb.Subscribe("a.b", sub5)
+	mb.Subscribe("a.b.c", sub5)
+
+	subscriptions := mb.Subscriptions()
+
+	expected := map[string][]Subscriber{
+		"a":     []Subscriber{sub1, sub2},
+		"b":     []Subscriber{sub1},
+		"a.b":   []Subscriber{sub3, sub4, sub5},
+		"a.b.c": []Subscriber{sub5},
+	}
+
+	if assert.Len(subscriptions, len(expected)) {
+		for topic, subscribers := range subscriptions {
+			exp, ok := expected[topic]
+			if assert.True(ok) && assert.Len(subscribers, len(exp)) {
+				for _, actual := range subscribers {
+					assert.Contains(exp, actual)
+				}
+			}
+		}
+	}
+}
+
+func TestTopics(t *testing.T) {
+	assert := assert.New(t)
+	mb := New(NewAMQPConfig())
+	assert.Equal([]string{}, mb.Topics())
+	sub := subscriber("abc")
+	mb.Subscribe("a", sub)
+	mb.Subscribe("b", sub)
+	mb.Subscribe("a.b.c", sub)
+	mb.Subscribe("a.#.c", sub)
+	mb.Subscribe("a.*.c", sub)
+
+	topics := mb.Topics()
+
+	expected := []string{"a", "b", "a.b", "a.b.c", "a.#", "a.*", "a.#.c", "a.*.c"}
+
+	if assert.Len(topics, len(expected)) {
+		for _, actual := range topics {
+			assert.Contains(expected, actual)
+		}
+	}
+}
+
 // Ensures reduceZeroOrMoreWildcards reduces sequences of # to a single
 // instance.
 func TestReduceZeroOrMoreWildcards(t *testing.T) {
