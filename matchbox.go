@@ -55,8 +55,12 @@ type Matchbox interface {
 
 	// Subscribers returns the Subscribers for a topic.
 	Subscribers(topic string) []Subscriber
+
+	// Subscriptions returns a map of topics to Subscribers.
+	Subscriptions() map[string][]Subscriber
 }
 
+// matchbox implements the Matchbox interface using a backing concurrent trie.
 type matchbox struct {
 	*ctrie
 }
@@ -79,4 +83,26 @@ func (m *matchbox) Unsubscribe(topic string, subscriber Subscriber) {
 // Subscribers returns the Subscribers for a topic.
 func (m *matchbox) Subscribers(topic string) []Subscriber {
 	return m.Lookup(topic)
+}
+
+// Subscriptions returns a map of topics to Subscribers.
+func (m *matchbox) Subscriptions() map[string][]Subscriber {
+	snapshot := m.ReadOnlySnapshot()
+	subscriptions := map[string][]Subscriber{}
+	root := snapshot.root.main.cNode
+	for key, br := range root.branches {
+		m.subscriptions(subscriptions, key, br)
+	}
+	return subscriptions
+}
+
+func (m *matchbox) subscriptions(subscriptions map[string][]Subscriber, path string, br *branch) {
+	if len(br.subs) > 0 {
+		subscriptions[path] = br.subscribers()
+	}
+	if br.iNode != nil && br.iNode.main.cNode != nil {
+		for key, br := range br.iNode.main.cNode.branches {
+			m.subscriptions(subscriptions, path+m.config.Delimiter+key, br)
+		}
+	}
 }
