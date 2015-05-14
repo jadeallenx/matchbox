@@ -15,9 +15,20 @@ type Subscriber interface {
 // Config contains configuration parameters for a Matchbox such as wildcards
 // and the word delimiter.
 type Config struct {
-	SingleWildcard     string
+	// SingleWildcard is a wildcard which matches exactly one word. For
+	// example, if SingleWildcard is "*", "foo.*.baz" matches "foo.bar.baz" and
+	// "foo.qux.baz" but not "foo.baz".
+	SingleWildcard string
+
+	// ZeroOrMoreWildcard is a wildcard which matches zero or more words. For
+	// example, if ZeroOrMoreWildcard is "#", "foo.#.baz" matches "foo.baz",
+	// "foo.bar.baz", and "foo.bar.qux.baz" but not "foo.bar".
 	ZeroOrMoreWildcard string
-	Delimiter          string
+
+	// Delimiter is the sequence which separates words. For example, if
+	// Delimiter is ".", "foo.bar.baz" consists of the words "foo", "bar", and
+	// "baz".
+	Delimiter string
 }
 
 // reduceZeroOrMoreWildcards reduces sequences of zero-or-more wildcards,
@@ -35,7 +46,8 @@ func (c *Config) reduceZeroOrMoreWildcards(words []string) []string {
 }
 
 // NewAMQPConfig returns a Config which implements the AMQP specification for
-// topic matching.
+// topic matching. Words are delimited by ".", single-word wildcards denoted by
+// "*", and zero-or-more-word wildcards by "#".
 func NewAMQPConfig() *Config {
 	return &Config{
 		SingleWildcard:     amqpSingleWildcard,
