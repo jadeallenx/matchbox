@@ -6,15 +6,15 @@ Matchbox is a concurrent pattern-matching engine designed for high-throughput to
 type subscriber string
 
 func (s subscriber) ID() string {
-		return string(s)
+	return string(s)
 }
 
 var (
-		forex  = subscriber("forex")
-		stock  = subscriber("stock")
-		nasdaq = subscriber("nasdaq")
-		nyse   = subscriber("nyse")
-		tech   = subscriber("tech")
+	forex  = subscriber("forex")
+	stock  = subscriber("stock")
+	nasdaq = subscriber("nasdaq")
+	nyse   = subscriber("nyse")
+	tech   = subscriber("tech")
 )
 
 mb := matchbox.New(matchbox.NewAMQPConfig())
@@ -28,7 +28,7 @@ mb.Subscribe("EUR.STOCK.DB", forex)
 mb.Subscribe("USD.#", forex)
 
 for _, sub := range mb.Subscribers("PRICE.STOCK.NYSE.IBM") {
-		fmt.Println("PRICE.STOCK.NYSE.IBM", sub.ID())
+	fmt.Println("PRICE.STOCK.NYSE.IBM", sub.ID())
 }
 ```
 
